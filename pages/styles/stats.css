@@ -1,7 +1,23 @@
 @import url("include/common.css");
-@import url("node_modules/dc/dc.css");
+@import url("node_modules/dc/dist/style/dc.css");
 @import url("node_modules/jqcloud-npm/dist/jqcloud.css");
 
+body.fade-in {
+    opacity: 1;
+    transition: 1s opacity;
+}
+
+.highcharts-container {
+  margin: 0 auto;
+}
+
+.pie-slice path {
+		stroke:#fff;
+}
+.dc-chart .selected path {
+		stroke-width: 1;
+		stroke:#fff;
+}
 
 .dc-chart .pie-slice {
 	fill: black;
@@ -52,7 +68,7 @@ transform: translate(260px,130px)
 	left: 0;
 	right: 0;
 	width: 100%;
-	background: white;
+	background: red;
 }
 
 

@@ -1,81 +1,27 @@
-$("#lighthouseTeamSummaryButton").mouseenter(function(ev) {
+$("#lighthouseTeamSummaryButton").on("click", function() {
   summary();
-});
+})
 
-document.getElementById("lighthouseTeamSummaryButton").onclick = function() {
-  summary();
-}
-
-function summary(){
+function summary() {
   var hqs = filterViewModel.selectedEntities.peek();
   var start = new Date(filterViewModel.startDate.peek()._d);
   var end = new Date(filterViewModel.endDate.peek()._d);
 
-  var hq = hqs.map(function(d){
+  var hq = hqs.map(function(d) {
     return d.Id;
   })
 
+  window.postMessage({
+    type: "FROM_PAGE_UPDATE_API_TOKEN",
+    host: urls.Base,
+    token: user.accessToken,
+    tokenexp: user.expiresAt,
+  }, "*");
+
+  $("#lighthouseTeamSummaryButton").attr('target', "_blank");
   if (hq.length !== 0) {
-    $("#lighthouseTeamSummaryButton").attr("href",lighthouseUrl+"pages/teamsummary.html?host="+urls.Base+"&source="+location.origin+"&hq="+hq+"&start="+encodeURIComponent(start.toISOString())+"&end="+encodeURIComponent(end.toISOString())+ "&token=" + encodeURIComponent(user.accessToken)+ "&tokenexp="+encodeURIComponent(user.expiresAt));
+    $("#lighthouseTeamSummaryButton").attr("href", lighthouseUrl + "pages/teamsummary.html?host=" + urls.Base + "&source=" + location.origin + "&hq=" + hq + "&start=" + encodeURIComponent(start.toISOString()) + "&end=" + encodeURIComponent(end.toISOString()));
   } else {
-    $("#lighthouseTeamSummaryButton").attr("href",lighthouseUrl+"pages/teamsummary.html?host="+urls.Base+"&source="+location.origin+"&start="+encodeURIComponent(start.toISOString())+"&end="+encodeURIComponent(end.toISOString())+ "&token=" + encodeURIComponent(user.accessToken)+ "&tokenexp="+encodeURIComponent(user.expiresAt));
+    $("#lighthouseTeamSummaryButton").attr("href", lighthouseUrl + "pages/teamsummary.html?host=" + urls.Base + "&source=" + location.origin + "&start=" + encodeURIComponent(start.toISOString()) + "&end=" + encodeURIComponent(end.toISOString()));
   }
 }
-
-
-DoTour()
-
-function DoTour() {
-  require('bootstrap-tour')
-
-    // Instance the tour
-    var tour = new Tour({
-      name: "LHTourTeams",
-      smartPlacement: true,
-      placement: "right",
-      debug: true,
-      steps: [
-      {
-        element: "",
-        placement: "top",
-        orphan: true,
-        backdrop: true,
-        title: "Lighthouse Welcome",
-        content: "Lighthouse has made some changes to this page. would you like a tour?"
-      },
-      {
-        element: "#lighthouseTeamSummaryButton",
-        title: "Lighthouse Summary",
-        placement: "bottom",
-        backdrop: false,
-        content: "Lighthouse Summary provides a simple to read screen that gives a summary of all job. It will only follow Headquarter and Date filters.",
-      },
-      {
-        element: "#lhquickfilter",
-        title: "Lighthouse Quickfilters",
-        placement: "right",
-        backdrop: false,
-        onNext: function (tour) {
-          $('#lhquickfilter > ul').hide();
-        },
-        content: "Lighthouse adds a new filter menu that groups together common filters.",
-      },
-      {
-        element: "",
-        placement: "top",
-        orphan: true,
-        backdrop: true,
-        title: "Questions?",
-        content: "If you have any questions please seek help from the 'About Lighthout' button under the lighthouse menu on the top menu"
-      },
-      ]
-    })
-
-    /// Initialize the tour
-    tour.init();
-
-// Start the tour
-tour.start();
-}
-
-

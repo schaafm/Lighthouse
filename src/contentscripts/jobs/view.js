@@ -2,6 +2,7 @@ var inject = require('../../../lib/inject.js');
 var _ = require('underscore');
 var DOM = require('jsx-dom-factory');
 var $ = require('jquery');
+var vincenty = require('../../../lib/vincenty.js');
 
 
 window.addEventListener("message", function(event) {
@@ -10,7 +11,7 @@ window.addEventListener("message", function(event) {
     return;
   if (event.data.type && (event.data.type == "FROM_PAGE_FTASBESTOS_SEARCH")) {
     chrome.runtime.sendMessage({type: "asbestos", address: event.data.address}, function(response) {
-      if (response.resultbool == false)
+    if (response.resultbool == false)
       {
         response.requrl = ''
       }
@@ -18,6 +19,23 @@ window.addEventListener("message", function(event) {
     });
   } else if (event.data.type && (event.data.type == "FROM_PAGE_SESASBESTOS_RESULT")) {
     asbestosBoxColor(event.data.address.PrettyAddress+" was FOUND on the SES asbestos register.",'red','')
+  } else if (event.data.type && (event.data.type == "FROM_PAGE_UPDATE_API_TOKEN")) {
+
+  } else if (event.data.type && (event.data.type == "FROM_PAGE_LHQ_DISTANCE")) {
+    var t0 = performance.now();
+  $.getJSON(chrome.extension.getURL("resources/SES_HQs.geojson"), function (data) {
+    distances = []
+    data.features.forEach(function(v){
+      v.distance = vincenty.distVincenty(v.properties.POINT_Y,v.properties.POINT_X,event.data.lat,event.data.lng)/1000
+      distances.push(v)
+    })
+    let _sortedDistances = distances.sort(function(a, b) {
+      return a.distance - b.distance
+    });
+    $('#nearest-lhq-text').text(`${_sortedDistances[0].properties.HQNAME} (${_sortedDistances[0].distance.toFixed(2)} kms), ${_sortedDistances[1].properties.HQNAME} (${_sortedDistances[1].distance.toFixed(2)} kms), ${_sortedDistances[2].properties.HQNAME} (${_sortedDistances[2].distance.toFixed(2)} kms)`)
+    var t1 = performance.now();
+    console.log("Call to calculate distances from LHQs took " + (t1 - t0) + " milliseconds.")
+})
   }
 }, false);
 
@@ -25,7 +43,6 @@ function asbestosBoxColor(text, color, url) {
   $('#asbestos-register-text').html(text);
   if (url != '')
   {
-    console.log("got url")
     $('#asbestos-register-box')
       .css('cursor','pointer')
       .click(function(){
@@ -42,13 +59,12 @@ function asbestosBoxColor(text, color, url) {
 function renderQuickText(id, selections) {
   return (
     <div class="form-group">
-    <div class="row">
     <label class="col-md-4 col-lg-3 control-label">
     <img style="width:16px;vertical-align:top;margin-right:5px"
     src={chrome.extension.getURL("icons/lh-black.png")} />
     Quick Text
     </label>
-    <div class="col-md-8 col-lg-9">
+    <div class="col-md-8 col-lg-9" style="margin-bottom: 15px;">
     <select class="form-control" id={id} style="width:100%">
     {
       _.map(selections, function(selection) {
@@ -56,7 +72,6 @@ function renderQuickText(id, selections) {
       })
     }
     </select>
-    </div>
     </div>
     </div>
     );
@@ -105,13 +120,12 @@ var options = [
 
 var html = (
   <div class="form-group">
-  <div class="row">
   <label class="col-md-4 col-lg-3 control-label">
   <img style="width:16px;vertical-align:top;margin-right:5px"
   src={chrome.extension.getURL("icons/lh-black.png")} />
   Quick Tasks
   </label>
-  <div class="col-md-8 col-lg-9">
+  <div class="col-md-8 col-lg-9" style="margin-bottom: 15px;">
   {
     _.map(options, function(option) {
       return (
@@ -123,7 +137,6 @@ var html = (
   }
   </div>
   </div>
-  </div>
 );
 
 // Quick Text - Job - Team Complete
@@ -132,7 +145,7 @@ var html2 = renderQuickText("CompleteTeamQuickTextBox", [
   "NSW SES volunteers attended scene and resident no longer required assistance.",
   ])
 
-$('#completeTeamModal .modal-body .form-group:nth-child(12)').after([html, html2]);
+$('#completeTeamModal > div > div > div.modal-body > div > div > div > textarea[data-bind$="value: actionTaken"]').parent().parent().after([html, html2]);
 
 // Insert element into DOM - Will populate with AJAX results via checkAddressHistory()
 job_view_history = (
@@ -159,6 +172,26 @@ job_asbestos_history = (
   </div>
 );
 
+job_nearest_lhq = (
+  <div class="form-group">
+  <label class="col-xs-3 col-sm-2 col-md-4 col-lg-3 control-label"><img style="margin-left:-21px;width:16px;vertical-align:inherit;margin-right:5px"
+  src={chrome.extension.getURL("icons/lh-black.png")} /><abbr title="Distance as the crow flies">Closest LHQs </abbr></label>
+  <div id="nearest-lhq-box" class="col-xs-9 col-sm-10 col-md-8 col-lg-9">
+  <p id="nearest-lhq-text" class="form-control-static">Waiting...</p>
+  </div>
+  </div>
+);
+
+job_nearest_avl = (
+  <div class="form-group">
+  <label class="col-xs-3 col-sm-2 col-md-4 col-lg-3 control-label"><img style="margin-left:-21px;width:16px;vertical-align:inherit;margin-right:5px"
+  src={chrome.extension.getURL("icons/lh-black.png")} /><abbr title="As reported and filtered by Beacon, distance as the crow flies">Closest AVLs </abbr></label>
+  <div id="nearest-avl-box" class="col-xs-9 col-sm-10 col-md-8 col-lg-9">
+  <p id="nearest-avl-text" class="form-control-static">Waiting...</p>
+  </div>
+  </div>
+);
+
 $('fieldset.col-md-12').each(function(k,v){
   var $v = $(v);
   var $p = $v.closest('fieldset');
@@ -178,6 +211,16 @@ $('fieldset.col-md-12').each(function(k,v){
     return false;
   }
 
+})
+
+
+$('#editRfaForm > fieldset.col-md-8 > div > label').each(function(k,v){
+  var $v = $(v);
+  if (v.innerText == 'LGA') {
+    $v.parent().after(job_nearest_avl)
+    $v.parent().after(job_nearest_lhq)
+    return false;
+  }
 })
 
 job_lighthouse_actions = (

@@ -1,15 +1,17 @@
 // This background script is initialised and executed once and exists
 // separate to all other pages.
 
-const tj = require('togeojson');
+var tj = require('@mapbox/togeojson');
 
 //Sit Aware Map Data Feeds
 const rfsMajorIncidentsFeed = "https://www.rfs.nsw.gov.au/feeds/majorIncidents.json";
 const transportFeed = "https://api.transport.nsw.gov.au/";
 const openSkyFeed = "https://opensky-network.org/api/states/all";
-const essentialEnergyOutagesFeed = 'http://www.essentialenergy.com.au/Asset/kmz/current.kml';
+const essentialEnergyOutagesFeed = 'https://www.essentialenergy.com.au/Assets/kmz/current.kml';
 const endeavourEnergyOutagesFeed = 'http://www.endeavourenergy.com.au/mobileapp/outage/outages/listBoth/current';
 const ausgridBaseUrl = 'https://www.ausgrid.com.au/';
+
+//external libs
 
 //block message js core request, fetch the file, inject our vars then serve it back to the requestor. :-)
 chrome.webRequest.onBeforeRequest.addListener(
@@ -48,14 +50,42 @@ chrome.webRequest.onBeforeRequest.addListener(
     ["blocking"]
     );
 
+//block tasking  js core requests, fetch the original file async, replace some stuff, serve the file back to the requestor.
+// Reaplce the date picker with more options
+chrome.webRequest.onBeforeRequest.addListener(
+    function (details) {
+        console.log("blocking teams register js request")
+        var javascriptCode = loadSynchronously(details.url);
+        var replaced = javascriptCode.replace('"Last Month":[utility.dateRanges.LastMonth.StartDate(),utility.dateRanges.LastMonth.EndDate()]','"Last Month":[utility.dateRanges.LastMonth.StartDate(), utility.dateRanges.LastMonth.EndDate()],"This Calendar Year":[moment().startOf(\'year\'), moment().endOf(\'year\')],"All":\n [utility.minDate, moment().endOf(\'year\')]');
+        return { redirectUrl: "data:text/javascript,"+encodeURIComponent(replaced) };
+    },
+    { urls: ["https://*.ses.nsw.gov.au/js/teams/index?v=*","https://*.ses.nsw.gov.au/js/teams/index?v=*"] },
+    ["blocking"]
+    );
+
+
+    //block team create js core requests, fetch the original file async, replace some stuff, serve the file back to the requestor.
+    chrome.webRequest.onBeforeRequest.addListener(
+        function (details) {
+            console.log("blocking team create js request")
+            var javascriptCode = loadSynchronously(details.url);
+            var replaced = "var vm;"+javascriptCode.replace("var n=new TeamViewModel;","var n=new TeamViewModel;vm=n;");
+            return { redirectUrl: "data:text/javascript,"+encodeURIComponent(replaced) };
+        },
+        { urls: ["https://*.ses.nsw.gov.au/js/teams/create?v=*"] },
+        ["blocking"]
+        );
+
 
 chrome.runtime.onMessage.addListener(
     function(request, sender, sendResponse) {
-        console.log(request);
         if (request.type === "asbestos") {
             checkAsbestosRegister(request.address,function(result,colour,bool,url){
                 sendResponse({result: result, colour: colour, resultbool: bool, requrl: url})
             });
+            return true;
+        } else if (request.type === 'API_TOKEN_UPDATE') {
+          localStorage.setItem('beaconAPIToken-'+request.host, JSON.stringify(request.token));
             return true;
         } else if (request.type === 'rfs') {
             fetchRfsIncidents(function(data) {
@@ -76,7 +106,7 @@ chrome.runtime.onMessage.addListener(
             fetchTransportResource('v1/live/cameras', function(data) {
                 sendResponse(data);
             }, request.params.apiKey);
-            return true;    
+            return true;
         } else if (request.type === 'helicopters') {
             fetchHelicopterLocations(request.params, function(data) {
                 sendResponse(data);
@@ -190,26 +220,26 @@ function loadSynchronously(url) {
 
     fetchEssentialEnergyOutages(function(essentialEnergyData) {
         finalData.essential = essentialEnergyData
-        merge()
+        merge("EssentialEnergy")
     })
 
     fetchEndeavourEnergyOutages(function(endeavourEnergyData) {
         finalData.endeavour = endeavourEnergyData
-        merge()
+        merge("EndeavourEnergy")
     })
 
     fetchAusgridOutages(function(AusgridData){
         finalData.ausgrid = AusgridData
-        merge()
+        merge("Ausgrid")
     });
 
 
 
-    function merge() {
-        console.log("checking if all power outage data is back")
+    function merge(name) {
+        console.log(name+" is back," +"checking if all power outage data is back")
         if (finalData.essential && finalData.endeavour && finalData.ausgrid)
         {
-            console.log("merging power outages")
+            console.log("merging all power outages")
             var merged = {}
             merged.features = []
             //if you just push you end up with an array of the array not a merged array like you might want.
@@ -233,7 +263,7 @@ function loadSynchronously(url) {
     var xhttp = new XMLHttpRequest();
     xhttp.onloadend = function () {
         if (this.readyState === 4 && this.status === 200) {
-            geoJson = {
+            ausgridGeoJson = {
                 'type': 'FeatureCollection',
                 'features': []
             };
@@ -251,7 +281,7 @@ function loadSynchronously(url) {
 
             if (expectCount == 0) //call back if theres none.
             {
-                callback(geoJson)
+                callback(ausgridGeoJson)
             }
 
             result.d.Data.forEach(function(item) {
@@ -285,8 +315,8 @@ function loadSynchronously(url) {
                     point.coordinates = []
                     point.coordinates.push(item.Coords[0].lng,item.Coords[0].lat)
 
-                    feature.geometry.geometries.push(point)                    
-                    
+                    feature.geometry.geometries.push(point)
+
                     fetchAusgridOutage(item.WebId,item.OutageDisplayType, function(outageresult){ //for each outage ask their API for the deatils of the outage
                         if (typeof(outageresult.error) === 'undefined') //if no error
                         {
@@ -300,13 +330,13 @@ function loadSynchronously(url) {
                             feature.properties.type = "Outage"
                             feature.properties.startDateTime = outageresult.d.Data.StartDateTime
                             feature.properties.endDateTime = outageresult.d.Data.EstRestTime
-                            geoJson.features.push(feature)
+                            ausgridGeoJson.features.push(feature)
                         } else {
                             expectCount--
                         }
-                        if (geoJson.features.length == expectCount) //return once all the data is back
+                        if (ausgridGeoJson.features.length == expectCount) //return once all the data is back
                         {
-                            callback(geoJson)
+                            callback(ausgridGeoJson)
                         }
                     })
 }
@@ -329,7 +359,7 @@ function loadSynchronously(url) {
 /**
  * Fetche Ausgrid power outage detail.
  * @param webId web ID
- * @param type OutageDisplayType 
+ * @param type OutageDisplayType
  * @param callback the callback to send the data to.
  */
  function fetchAusgridOutage(id,type,callback) {
@@ -379,7 +409,7 @@ function loadSynchronously(url) {
                 var json = []
 
             }
-            geoJson = {
+            endeavourGeoJson = {
                 'type': 'FeatureCollection',
                 'features': []
             };
@@ -413,10 +443,10 @@ function loadSynchronously(url) {
                     }
                 };
 
-                geoJson.features.push(feature);
+                endeavourGeoJson.features.push(feature);
             }
 
-            callback(geoJson);
+            callback(endeavourGeoJson);
         } else {
             // error
             var response = {
@@ -441,11 +471,11 @@ function loadSynchronously(url) {
     xhttp.onloadend = function () {
         if (this.readyState === 4 && this.status === 200) {
             var kml = xhttp.responseXML;
-            var geoJson = tj.kml(kml);
-            for (var i = 0; i < geoJson.features.length; i++) {
-                geoJson.features[i].owner='EssentialEnergy'
+            var essentialGeoJson = tj.kml(kml);
+            for (var i = 0; i < essentialGeoJson.features.length; i++) {
+                essentialGeoJson.features[i].owner='EssentialEnergy'
             }
-            callback(geoJson);
+            callback(essentialGeoJson);
         } else {
             // error
             var response = {
@@ -460,18 +490,15 @@ function loadSynchronously(url) {
 }
 
 function checkAsbestosRegister( inAddressObject, cb ){
-
     var AddressParts = /^(.+)\s(.+)$/.exec( inAddressObject.Street );
     if( !inAddressObject.Flat )
         inAddressObject.Flat = "";
-    var formAddress = "http://www.fairtrading.nsw.gov.au/ftw/Tenants_and_home_owners/Loose_fill_asbestos_insulation/Public_Search/LFAI_Public_Register.page?"+
-    "idol_totalhits=0&currentPage=1&"+
-    "form-unit="+encodeURI(inAddressObject.Flat)+"&"+
-    "form-streetno="+encodeURI(inAddressObject.StreetNumber)+"&"+
-    "form-street="+encodeURI(AddressParts[1])+"&"+
-    "form-streettype="+encodeURI(AddressParts[2])+"&"+
-    "form-suburb="+encodeURI(inAddressObject.Locality)+"&"+
-    "propertyaddress=Property%3A%28"+encodeURI(inAddressObject.Flat+" "+inAddressObject.StreetNumber+" "+inAddressObject.Street+" "+inAddressObject.Locality)+"%29";
+    var formAddress = "https://www.fairtrading.nsw.gov.au/loose-fill-asbestos-insulation-register?"+
+    "unit="+encodeURI(inAddressObject.Flat)+"&"+
+    "number="+encodeURI(inAddressObject.StreetNumber)+"&"+
+    "street="+encodeURI(AddressParts[1])+"&"+
+    "suburb="+encodeURI(inAddressObject.Locality)+"&"+
+    "type="+encodeURI(AddressParts[2])+"&"
 
     console.log("loading cache")
     var ftCache = JSON.parse(localStorage.getItem("lighthouseFTCache"));
@@ -479,7 +506,7 @@ function checkAsbestosRegister( inAddressObject, cb ){
     if (ftCache) {
 
         //walk the cache and clean it up first
-        
+
         var foundinCache = false
         ftCache.forEach(function(item) {
 

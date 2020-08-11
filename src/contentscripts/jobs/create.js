@@ -7,7 +7,7 @@ window.addEventListener("message", function(event) {
   if (event.source != window)
     return;
 
-  
+
   // We only accept messages from ourselves or the extension
   if (event.source != window)
     return;
@@ -19,7 +19,7 @@ window.addEventListener("message", function(event) {
       } else {
         window.postMessage({ type: "FROM_LH", result: true }, "*");
       }
-      asbestosBoxColor(response.result,response.colour,response.requrl)
+    asbestosBoxColor(response.result,response.colour,response.requrl)
     });
   } else if (event.data.type && (event.data.type == "FROM_PAGE_SESASBESTOS_RESULT")) {
     window.postMessage({ type: "FROM_LH", result: true }, "*");

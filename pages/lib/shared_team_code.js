@@ -5,7 +5,7 @@ function GetTaskingfromBeacon(Id, host, token, callback) {
   console.log("GetTaskingfromBeacon called with:" + Id+", "+host);
 
     LighthouseJson.get_json(
-    host+"/Api/v1/Tasking/Search?TeamIds=" + Id, token,
+    host+"/Api/v1/Tasking/Search?LighthouseFunction=GetTaskingfromBeacon&TeamIds=" + Id, token,
     function(res){
       console.log("Progress CB");
     },
@@ -21,14 +21,15 @@ function GetTaskingfromBeacon(Id, host, token, callback) {
 }
 
 //make the call to beacon
-function GetJSONTeamsfromBeacon(unit, host, StartDate, EndDate, token, callback, statusTypes = []) {
-  console.debug("GetJSONTeamsfromBeacon called with:" + unit + "," + host+", "+StartDate + "," + EndDate);
+function GetJSONTeamsfromBeacon(unit, host, StartDate, EndDate, token, callback, progressCallBack, statusTypes = []) {
+  console.debug("GetJSONTeamsfromBeacon called");
   let params = {};
   params['StatusStartDate'] = StartDate.toISOString();
   params['StatusEndDate'] = EndDate.toISOString();
-  params['SortField'] = 'CreatedOn';
-  params['SortOrder'] = 'desc';
+  params['SortField'] = 'callsign';
+  params['SortOrder'] = 'asc';
   params['StatusTypeId'] = statusTypes;
+  params['IncludeDeleted'] = false;
 
   if (unit !== null || typeof unit == undefined) {
     if (Array.isArray(unit) == false) {
@@ -48,12 +49,19 @@ function GetJSONTeamsfromBeacon(unit, host, StartDate, EndDate, token, callback,
     }
   }
 
-  var url = host+"/Api/v1/Teams/Search?" + $.param(params, true);
-    
+  var url = host+"/Api/v1/Teams/Search?LighthouseFunction=GetJSONTeamsfromBeacon&" + $.param(params, true);
+  var lastDisplayedVal = 0 ;
   LighthouseJson.get_json(
     url, token,
-    function(res){
-      console.debug("Progress CB");
+    function(count,total){
+      if (count > lastDisplayedVal) { //buffer the output to that the progress alway moves forwards (sync loads suck)
+        lastDisplayedVal = count;
+        progressCallBack(count,total);
+      }
+      if (count == -1 && total == -1) { //allow errors
+        progressCallBack(count,total);
+      }
+
     },
     function(results) { //call for the JSON, rebuild the array and return it when done.
       console.debug("GetJSONfromBeacon call back");
@@ -193,4 +201,3 @@ module.exports = {
   get_teams: GetJSONTeamsfromBeacon,
   getTeamGeoJson: getTeamGeoJson
 };
-

@@ -20,7 +20,7 @@ $(document).ready(function() {
     $.each(qs, function(value, key){
         switch (value)
         {
-            case "importcollection":
+            case "lhimportcollection":
             $('#LHImportCollectionErrorText').hide()
             DownloadedObject = {}
             $('#LHCodeBox').val(key)
@@ -28,11 +28,46 @@ $(document).ready(function() {
             $('#LHCodeBox').show()
             $('#LHImportCollectionCode').text('Download Collection')
             $('#LHCollectionImportModal').modal();
+            break
 
-
-            window.history.pushState("object or string", "Title", window.location.pathname );
-
-
+            case "lhquickrecipient":
+            var people = JSON.parse(unescape(key))
+            console.log(people)
+            $.each(people, function(key, val) {
+                $.ajax({
+                    type: 'GET',
+                    url: urls.Base+'/Api/v1/People/' + val + '/Contacts',
+                    beforeSend: function(n) {
+                        n.setRequestHeader("Authorization", "Bearer " + user.accessToken)
+                    },
+                    data: {
+                        LighthouseFunction: 'LoadPerson'
+                    },
+                    cache: false,
+                    dataType: 'json',
+                    complete: function(response, textStatus) {
+                        if (textStatus == 'success') {
+                            var wasAdded = false
+                            if (response.responseJSON.Results.length) {
+                                $.each(response.responseJSON.Results, function(k, v) {
+                                    if (v.ContactTypeId == 2) {
+                                        var BuildNew = {};
+                                        BuildNew.Contact = v
+                                        BuildNew.ContactGroup = null
+                                        BuildNew.ContactTypeId = v.ContactTypeId
+                                        BuildNew.Description = v.FirstName + " " + v.LastName;
+                                        BuildNew.Recipient = v.Detail;
+                                        msgsystem.selectedRecipients.push(BuildNew)
+                                    }
+                                })
+                                  }
+                                }
+                              }
+                            })
+                            })
+                            $([document.documentElement, document.body]).animate({
+                              scrollTop: $('textarea[data-bind="value: messageText"]')[0].scrollIntoView()
+                            }, 2000);
             break
         }
 
@@ -83,7 +118,7 @@ $(document).ready(function() {
 
             spinner.remove()
             $('#LHGenerateShareCollectionCode').text(response.responseJSON.code)
-            $('#LHGenerateShareCollectionCodeURL').text(window.location.href+"?importcollection="+response.responseJSON.code)
+            $('#LHGenerateShareCollectionCodeURL').text(window.location.href+"?lhimportcollection="+response.responseJSON.code)
 
         }
     }
@@ -102,7 +137,6 @@ $('#LHImportCollectionCode').click(function() {
         $('#LHImportCollectionErrorText').append(spinner)
 
 
-        console.log(code)
         $.ajax({
             type: 'POST',
             url: "https://tdykes.com/lighthouse/collection.php",
@@ -111,7 +145,23 @@ $('#LHImportCollectionCode').click(function() {
                 LighthouseFunction: 'CollectionLoadCollection',
                 source: location.hostname,
                 code: code
-            },
+            }, xhr: function() {
+            // Get new xhr object using default factory
+            var xhr = jQuery.ajaxSettings.xhr();
+            // Copy the browser's native setRequestHeader method
+            var setRequestHeader = xhr.setRequestHeader;
+            // Replace with a wrapper
+            xhr.setRequestHeader = function(name, value) {
+            // Ignore the X-Requested-With header
+            if (name == 'Authorization') return;
+            // Otherwise call the native setRequestHeader method
+            // Note: setRequestHeader requires its 'this' to be the xhr object,
+            // which is what 'this' is here when executed.
+            setRequestHeader.call(this, name, value);
+        }
+        // pass it on to jQuery
+        return xhr;
+    },
             cache: false,
             dataType: 'json',
             complete: function(response, textStatus) {
@@ -131,7 +181,6 @@ $('#LHImportCollectionCode').click(function() {
                     $(button).find('span.sharebutton').hide()
                     $('#LGCollectionImportGroup').append(button)
                     $('#LHImportCollectionCode').text('Accept & Save')
-                    console.log(DownloadedObject)
 
                 } else if (response.responseJSON.result == 'NOTFOUND') {
                     $('#LHImportCollectionErrorText').show()
@@ -139,30 +188,29 @@ $('#LHImportCollectionCode').click(function() {
                     console.log(response.responseJSON.result)
                 } else if (response.responseJSON.result == 'MISSMATCH') {
                     $('#LHImportCollectionErrorText').show()
-                    $('#LHImportCollectionErrorText').text('Requested collection is not for '+location.hostname+' it is for '+response.responseJSON.source) 
+                    $('#LHImportCollectionErrorText').text('Requested collection is not for '+location.hostname+' it is for '+response.responseJSON.source)
                 } else if (response.responseJSON.result == 'EXPIRED') {
                     $('#LHImportCollectionErrorText').show()
-                    $('#LHImportCollectionErrorText').text('Code has expired') 
+                    $('#LHImportCollectionErrorText').text('Code has expired')
                 }
             }
         })
 } else if ($('#LHImportCollectionCode').text() == "Accept & Save") {
     $('#LHCollectionImportModal').modal('hide');
-    console.log(DownloadedObject)
     window.postMessage({ type: 'SAVE_COLLECTION', newdata:JSON.stringify(DownloadedObject), name: 'lighthouseMessageCollections'}, '*');
 }
 
 })
 
 $('#LHGenerateShareCollectionCode').click(function(e) {
-  //  
+  //
   copyToClipboard($('#LHGenerateShareCollectionCode').text())
   $('#clicktocopy').text('Copied to clipboard')
   e.stopPropagation();
 })
 
 $('#LHGenerateShareCollectionCodeURL').click(function(e) {
-  //  
+  //
   copyToClipboard($('#LHGenerateShareCollectionCodeURL').text())
   $('#clicktocopyURL').text('Copied to clipboard')
   e.stopPropagation();
@@ -307,10 +355,6 @@ if (localStorage.getItem("LighthouseMessagesEnabled") == "true" || localStorage.
 
     LoadAllCollections();
 
-    DoTour()
-
-
-
 });
 
 function LoadNitc() {
@@ -390,9 +434,9 @@ function LoadNitc() {
 
                                                     }
                                                 })
-if (wasAdded == false)
-{
-   total--
+                                                  if (wasAdded == false)
+                                                    {
+                                                      total--
                                                         if (total == 0) //when they have all loaded, stop spinning.
                                                         {
                                                             spinner.remove();
@@ -401,56 +445,56 @@ if (wasAdded == false)
                                                         }
                                                     }
                                                 } else {
-  //no results for this guy. thats ok, skip it.  
+                                                    //no results for this guy. thats ok, skip it.
 
-    if ($total == 0) //when they have all loaded, stop spinning.
-    {
-        console.log('done loading team')
-        spinner.remove();
-        //cb for when they are loaded
-        $(button).children().css('display','')
-    }  
-}
-} else {
-  //bad answer from the server. thats ok, skip it.  
+                                                    if ($total == 0) //when they have all loaded, stop spinning.
+                                                    {
+                                                      console.log('done loading team')
+                                                      spinner.remove();
+                                                      //cb for when they are loaded
+                                                      $(button).children().css('display','')
+                                                    }
+                                                  }
+                                                } else {
+                                                  //bad answer from the server. thats ok, skip it.
 
-    if ($total == 0) //when they have all loaded, stop spinning.
-    {
-        console.log('done loading team')
-        spinner.remove();
-        //cb for when they are loaded
-        $(button).children().css('display','')
-    }  
-}
-}
-})
-})
-})
-$(button).appendTo('#lighthousenitc');
-button.style.width = button.offsetWidth + "px";
-button.style.height = button.offsetHeight + "px";
-}
-})
-} else {
-            //nothing found
-            $('#lighthousenitc').empty() //empty to prevent dupes
+                                                  if ($total == 0) //when they have all loaded, stop spinning.
+                                                    {
+                                                      console.log('done loading team')
+                                                      spinner.remove();
+                                                      //cb for when they are loaded
+                                                      $(button).children().css('display','')
+                                                    }
+                                                  }
+                                                }
+                                              })
+                                            })
+                                          })
+                                          $(button).appendTo('#lighthousenitc');
+                                          button.style.width = button.offsetWidth + "px";
+                                          button.style.height = button.offsetHeight + "px";
+                                        }
+                                      })
+                                    } else {
+                                      //nothing found
+                                      $('#lighthousenitc').empty() //empty to prevent dupes
 
-        }
-        $('#nitccount').text(numberOfevents)
-        if (response.responseJSON.TotalItems >  response.responseJSON.PageSize)
-        {
-            var loadall = make_nitc_load_all_button(response.responseJSON.TotalItems)
-            $(loadall).find('#nitcloadall').click(function() {
-                FetchNITC(response.responseJSON.TotalItems)
-            })
-            $(loadall).appendTo('#lighthousenitcpanel');
-        }
+                                    }
+                                    $('#nitccount').text(numberOfevents)
+                                    if (response.responseJSON.TotalItems >  response.responseJSON.PageSize)
+                                    {
+                                      var loadall = make_nitc_load_all_button(response.responseJSON.TotalItems)
+                                      $(loadall).find('#nitcloadall').click(function() {
+                                        FetchNITC(response.responseJSON.TotalItems)
+                                      })
+                                      $(loadall).appendTo('#lighthousenitcpanel');
+                                    }
 
 
-    })
-}
+                                  })
+                                }
 
-}
+                              }
 
 
 function LoadTeams() {
@@ -538,7 +582,7 @@ if (wasAdded == false)
                                                         }
                                                     }
                                                 } else {
-  //no results for this guy. thats ok, skip it.  
+  //no results for this guy. thats ok, skip it.
 
     if (total == 0) //when they have all loaded, stop spinning.
     {
@@ -546,11 +590,11 @@ if (wasAdded == false)
         spinner.remove();
         //cb for when they are loaded
         $(button).children().css('display','')
-    }  
+    }
 }
 } else {
-  total-- 
-  //bad answer from the server. thats ok, skip it.  
+  total--
+  //bad answer from the server. thats ok, skip it.
 
     if ($total == 0) //when they have all loaded, stop spinning.
     {
@@ -732,7 +776,7 @@ function LoadCollection(col, cb) {
                                   $total = $total - 1;
                                   if ($total == 0) {
                                     cb();
-                                }  
+                                }
                             }
                         }
                     })
@@ -779,7 +823,7 @@ $.ajax({
           $total = $total - 1;
           if ($total == 0) {
             cb();
-        }  
+        }
     }
 }
 })
@@ -826,7 +870,7 @@ $.ajax({
           $total = $total - 1;
           if ($total == 0) {
             cb();
-        }  
+        }
     }
 }
 })
@@ -969,119 +1013,6 @@ function copyToClipboard(text) {
   $temp.val(text).select();
   document.execCommand("copy");
   $temp.remove();
-}
-
-function DoTour() {
-    require('bootstrap-tour')
-
-
-    // Instance the tour
-    var tour = new Tour({
-        name: "LHTourMessages",
-        smartPlacement: true,
-        placement: "right",
-        debug: false,
-        steps: [{
-            element: "",
-            placement: "top",
-            orphan: true,
-            backdrop: true,
-            title: "Lighthouse Welcome",
-            content: "Lighthouse has made some changes to this page. would you like a tour?"
-        },
-        {
-            element: "#lighthouseEnabled",
-            title: "Lighthouse Load",
-            placement: "bottom",
-            backdrop: false,
-            content: "Lighthouse can prefill the Available Contacts from you unit. Ticking this box enables this behavour. It will also select 'Operational' - 'Yes' by default",
-        },
-        {
-            element: "#lighthouseteams",
-            title: "Active Teams",
-            placement: "auto",
-            backdrop: false,
-            onShown: function(tour) {
-                $('#HQTeamsSet').show();
-            },
-            content: "All active teams at the selected HQ will be shown here. Click the team to SMS the members. Team leader of the clicked team will have (TL) in his name in the Selected Receipients box.",
-        },
-        {
-            element: "#lighthousenitc",
-            title: "NITC Events",
-            placement: "auto",
-            backdrop: false,
-            onShown: function(tour) {
-                $('#HQNitcSet').show();
-            },
-            content: "NITC attached to the selected HQ will be shown here. Click the event to SMS the participants.",
-        },
-        {
-            element: "#lighthousecollections",
-            title: "Lighthouse Collections",
-            placement: "top",
-            backdrop: false,
-            content: "Lighthouse Collections allow you to save a group of message recipients for quick selection later. Collections can contain any combination of recipients (including groups from different units or regions) and are synced between chrome profiles.",
-        },
-        {
-            element: "#collectionsave",
-            title: "Lighthouse Collections - Save",
-            placement: "top",
-            backdrop: false,
-            onNext: function(tour) {
-                button = make_collection_button("Example", "Tour Example", "13")
-                $(button).appendTo('#lighthousecollections');
-                button.style.width = (($(button).find('span.sharebutton')[0].offsetWidth)+($(button).find('span.delbutton')[0].offsetWidth)+button.offsetWidth) + "px"; //add the width of the X button to the width, to avoid overlap
-                button.style.height = button.offsetHeight + "px";
-                $(button).attr("id", "tourbutton")
-                $(button).find('span.sharebutton').attr("id", "sharebutton")
-                $(button).find('span.delbutton').attr("id", "delbutton")
-                
-            },
-            content: "Once you have selected some message recipients click 'Save Current As Collection' to save them for later. using a name that already exists will replace the old collection.",
-        },
-        {
-            element: "#tourbutton",
-            title: "Lighthouse Collections - Load",
-            placement: "top",
-            backdrop: false,
-            content: "This is a saved collection. Click it to load its contents into 'Selected Recipients'",
-        },
-        {
-            element: "#sharebutton",
-            title: "Lighthouse Collections - Share",
-            placement: "top",
-            backdrop: false,
-            content: "Click share icon to share the collection with other lighthouse users",
-        },
-        {
-            element: "#delbutton",
-            title: "Lighthouse Collections - Delete",
-            placement: "top",
-            backdrop: false,
-            onNext: function(tour) {
-                LoadAllCollections();
-                $('#tourbutton').remove()
-
-            },
-            content: "Click the 'X' to delete this collection",
-        },
-        {
-            element: "",
-            placement: "top",
-            orphan: true,
-            backdrop: true,
-            title: "Questions?",
-            content: "If you have any questions please seek help from the 'About Lighthout' button under the lighthouse menu on the top menu"
-        }
-        ]
-    })
-
-    /// Initialize the tour
-    tour.init();
-
-    // Start the tour
-    tour.start();
 }
 
 function parse_query_string(query) {

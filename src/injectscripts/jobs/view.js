@@ -1,72 +1,170 @@
 var DOM = require('jsx-dom-factory');
 var _ = require('underscore');
-var $ = require('jquery');
 var ReturnTeamsActiveAtLHQ = require('../../../lib/getteams.js');
 var postCodes = require('../../../lib/postcodes.js');
 var sesAsbestosSearch = require('../../../lib/sesasbestos.js');
+var vincenty = require('../../../lib/vincenty.js');
 
 
 console.log("Running inject script");
 
 //if ops logs update
-masterViewModel.notesViewModel.opsLogEntries.subscribe(lighthouseKeeper);
+masterViewModel.notesViewModel.opsLogEntries.subscribe(lighthouseDictionary);
 
 //if messages update
-masterViewModel.messagesViewModel.messages.subscribe(lighthouseKeeper);
+masterViewModel.messagesViewModel.messages.subscribe(lighthouseDictionary);
+
+//if ops logs update
+masterViewModel.notesViewModel.opsLogEntries.subscribe(function(){lighthouseMessageTPlus($('div[data-bind="foreach: opsLogEntries"] .text-muted:not([lhTPlus])'))});
+
+//if messages update
+masterViewModel.messagesViewModel.messages.subscribe(function(){lighthouseMessageTPlus($('div[data-bind="foreach: messages"] .text-muted:not([lhTPlus])'))});
+
+// timeline updates
+masterViewModel.jobHistory.subscribe(lighthouseTimeLineTPlus);
+
+
+//if the ETA inputs are visable
+masterViewModel.teamsViewModel.jobTeamStatusBeingUpdated.subscribe(lighthouseETA);
+
+//if the ETA time changes
+masterViewModel.teamsViewModel.jobTeamStatusEstimatedCompletion.subscribe(lighthouseETAFromNow);
 
 //if tasking update
 
-masterViewModel.teamsViewModel.taskedTeams.subscribe(lighthouseTasking);
+//Force the tasking function to last in the stack of subscribers for this.
+//Prevents the UI redrawing AFTER the icons have been set, meaning they get removed
+//https://stackoverflow.com/questions/779379/why-is-settimeoutfn-0-sometimes-useful
+masterViewModel.teamsViewModel.taskedTeams.subscribe(function() {
+  setTimeout(lighthouseTasking,0)
+});
+
+function lighthouseETAFromNow() {
+  var future = moment(masterViewModel.teamsViewModel.jobTeamStatusEstimatedCompletion.peek())
+  var now = moment()
+  var totalHours = future.diff(now, 'hours');
+  var totalMinutes = Math.ceil(future.diff(now, 'minutes'));
+  var clearMinutes = Math.ceil(totalMinutes % 60);
+  $('#quickETAtext').text("In "+totalHours + " hours and " + clearMinutes + " minutes")
+}
+
+function lighthouseETA() {
+  setTimeout( function() {
+    //dont draw for offsite
+    if (masterViewModel.teamsViewModel.jobTeamStatusTypeBeingUpdated().Id != 5)
+    {
+    $('a[data-bind$="loadingButton: $parent.updatingJobTeamStatus, click: $parent.updateJobTeamStatus"]')
+      .each(function(k,v){ //there can only be one, but why not handle more than one incase
+
+        var buttons = return_quicketarow()
+        var text = return_quicketamoment()
+
+        $('div[data-bind$="validationElement: $parent.jobTeamStatusEstimatedCompletion"].input-group').after(text)
 
 
-
-
-function lighthouseTasking() {
-  console.log("Tasking Changes");
-  ///Horrible nasty code for untasking
-
-  $('div.widget-content div.list-group div.list-group-item.clearfix div.col-xs-6.small.text-right').each(function(k, v) { //for every dom
-
-    //pull out the call sign and the status
-    DOMCallsign = ($(this)[0].parentNode.children[0].children[0].href.split("/")[4])
-    DOMStatus = ($(this)[0].parentNode.children[1].innerText.split(" ")[0])
-
-    //for every tasked team
-    $.each(masterViewModel.teamsViewModel.taskedTeams.peek(), function(k,vv){
-
-      //match against this DOM
-      if (vv.Team.Id == DOMCallsign && vv.CurrentStatus == DOMStatus && vv.CurrentStatusId == 1) //only show for tasking that can be deleted (tasked only)
-      {
-        //attached a X button if its matched and deletable
-        untask = return_untask_button()
-        $(v).append(untask)
-
-        //click function
-        $(untask).click(function() {
-          DOMCallsign = ($(this)[0].parentNode.parentNode.children[0].children[0].href.split("/")[4])
-          DOMStatus = ($(this)[0].parentNode.parentNode.children[1].innerText.split(" ")[0])
-
-          event.stopImmediatePropagation();
-          $.each(masterViewModel.teamsViewModel.taskedTeams.peek(), function(k,v){
-
-            if (v.Team.Id == DOMCallsign && v.CurrentStatus == DOMStatus) //match it again
-            {
-              untaskTeamFromJob(v.Team.Id, jobId, v.Id)  //untask it
-            }
-          })
+        $(buttons).find("#5min").click(function() {
+            addToTime(5,v,text)
         })
-      }
-    })
-  })
+        $(buttons).find("#10min").click(function() {
+          addToTime(10,v,text)
+        })
+        $(buttons).find("#15min").click(function() {
+          addToTime(15,v,text)
+        })
+        $(buttons).find("#30min").click(function() {
+          addToTime(30,v,text)
+        })
+        $(buttons).find("#60min").click(function() {
+          addToTime(60,v,text)
+        })
+        $(v).before(buttons)
 
-  ////END horrible untask code
+      })
+
+      function addToTime(addMins, where, text) {
+        var timeInput = $(where).parent('div').parent('div').parent('div').find('input[data-bind$="datetimepicker: $parent.jobTeamStatusEstimatedCompletion, attr: {placeholder: $parent.jobTeamStatusTypeBeingUpdated() ? ($parent.jobTeamStatusTypeBeingUpdated().Id == Enum.JobTeamStatusTypeEnum.Enroute.Id ? \'ETA\' : \'ETC\') : \'\' \}"]')
+        var now = moment()
+        var current = moment()
+        if (timeInput.val() != ''){
+          current = moment(timeInput.val(),'DD/MM/YYYY HH:mm')
+        }
+        var future = current.clone()
+        future.add(addMins,'m')
+        masterViewModel.teamsViewModel.jobTeamStatusEstimatedCompletion(future)
+      }
+}
+}, 0);
 
 }
 
 
-//call on run
-lighthouseKeeper();
+function lighthouseTasking() {
+    console.log("Tasking Changes, adding buttons where needed per team");
+    ///Horrible nasty code for untasking
 
+    $('a[data-bind="attr: {href: \'/Teams/\' + Team.Id + \'/Edit\'}, text: Team.Callsign"').each(function(k, v) { //for every dom that shows team name
+        if ($(v).parent().find("#message").length == 0) { //check for an existing msg button
+            DOMCallsign = ($(this)[0].href.split("/")[4])
+            //for every tasked team
+            $.each(masterViewModel.teamsViewModel.taskedTeams.peek(), function(k, vv) {
+                //match against this DOM
+                if (vv.Team.Id == DOMCallsign && vv.Team.Members.length)
+                {
+                    //attach a sms button
+                    msg = return_message_button()
+                    $(v).after(msg)
+
+                    //click function
+                    $(msg).click(function() {
+                        event.stopImmediatePropagation();
+                        var tightarray = []
+                        vv.Team.Members.map(function(member) {
+                            tightarray.push(member.Person.Id)
+                        })
+                        window.open('/Messages/Create?lhquickrecipient=' + escape(JSON.stringify(tightarray)), '_blank');
+                    })
+                }
+            })
+        } else {
+          console.log('already has a sms button')
+        }
+    })
+
+    $('div.widget-content div.list-group div.list-group-item.clearfix div.col-xs-6.small.text-right').each(function(k, v) { //for every team dom
+        if ($(v).parent().find("#untask").length == 0) { //check for an existing untask button
+
+            //pull out the call sign and the status
+            DOMCallsign = ($(this)[0].parentNode.children[0].children[0].href.split("/")[4])
+            DOMStatus = ($(this)[0].parentNode.children[1].innerText.split(" ")[0])
+            //for every tasked team
+            $.each(masterViewModel.teamsViewModel.taskedTeams.peek(), function(k, vv) {
+                //match against this DOM
+                if (vv.Team.Id == DOMCallsign && vv.CurrentStatus == DOMStatus && vv.CurrentStatusId == 1) //only show for tasking that can be deleted (tasked only)
+                {
+                    //attached a X button if its matched and deletable
+                    untask = return_untask_button()
+                    $(v).append(untask)
+
+                    //click function
+                    $(untask).click(function() {
+                        event.stopImmediatePropagation();
+                        untaskTeamFromJob(vv.Team.Id, jobId, vv.Id) //untask it
+                    })
+                }
+            })
+        } else {
+          console.log('already has untask button')
+        }
+    })
+}
+
+
+//call on run
+lighthouseDictionary();
+
+lighthouseMessageTPlus($('div[data-bind="foreach: messages"] .text-muted:not([lhTPlus])'))
+lighthouseMessageTPlus($('div[data-bind="foreach: opsLogEntries"] .text-muted:not([lhTPlus])'))
+lighthouseTimeLineTPlus();
 
 //call when the address exists
 whenAddressIsReady(function() {
@@ -78,16 +176,81 @@ whenAddressIsReady(function() {
     {
       $('#asbestos-register-text').html("Not A Searchable Address");
     } else {
-      sesAsbestosSearch(masterViewModel.geocodedAddress.peek(), function(res) {
+      sesAsbestosSearch(masterViewModel.geocodedAddress.peek(), function(res) { //check the ses asbestos register first
         if (res == true)
-        {
+        { //tell the inject page (rendering result handled on the inject page)
           window.postMessage({ type: "FROM_PAGE_SESASBESTOS_RESULT", address: masterViewModel.geocodedAddress.peek(), result: true, color: 'red' }, "*");
-        } else {
-          window.postMessage({ type: "FROM_PAGE_FTASBESTOS_SEARCH", address: masterViewModel.geocodedAddress.peek() }, "*");
-        }
+        } else { //otherwise check the fair trade database via background script
+            window.postMessage({ type: "FROM_PAGE_FTASBESTOS_SEARCH", address: masterViewModel.geocodedAddress.peek() }, "*");
+          }
       });
     }
+    if(typeof masterViewModel.geocodedAddress.peek() != 'undefined')
+    {
+     if (masterViewModel.geocodedAddress.peek().Latitude != null || masterViewModel.geocodedAddress.peek().Longitude != null) {
+       window.postMessage({ type: "FROM_PAGE_LHQ_DISTANCE", lat: masterViewModel.geocodedAddress.peek().Latitude, lng: masterViewModel.geocodedAddress.peek().Longitude }, "*");
+
+        if (masterViewModel.jobType.peek().ParentId == 5) { //Is a rescue
+          var t0 = performance.now();
+          let avlType = masterViewModel.jobType.peek().Name
+          switch(avlType) { //translations for different AVL names
+            case "RCR":
+            avlType = "GLR"
+            break
+          }
+        $.ajax({
+    type: 'GET'
+    , url: urls.Base+'/Api/v1/ResourceLocations/GET?resourceTypes='+avlType
+    , beforeSend: function(n) {
+      n.setRequestHeader("Authorization", "Bearer " + user.accessToken)
+    }
+    , cache: false
+    , dataType: 'json'
+    , data: {LighthouseFunction: 'NearestAVL'}
+    , complete: function(response, textStatus) {
+      if (textStatus == 'success')
+      {
+       avlDistances = []
+       response.responseJSON.forEach(function(v){
+            v.distance = vincenty.distVincenty(v.Latitude,v.Longtitude,masterViewModel.geocodedAddress.peek().Latitude,masterViewModel.geocodedAddress.peek().Longitude)/1000
+            avlDistances.push(v)
+          })
+       let _sortedAvlDistances = avlDistances.sort(function(a, b) {
+            return a.distance - b.distance
+          });
+          $('#nearest-avl-text').text('')
+       if (_sortedAvlDistances.length > 0) {
+         var maxLength = 3 //how many results to display
+         var used = 0
+         _sortedAvlDistances.forEach(function(v) { //safe way to loop with a limit
+           if (used < maxLength) {
+             used++
+           $('#nearest-avl-text').text($('#nearest-avl-text').text() + `${v.CallSign} (${v.distance.toFixed(2)} kms), `)
+         }
+         })
+         $('#nearest-avl-text').text($('#nearest-avl-text').text().slice(0,-2)) //trim the comma space from the very end
+       } else {
+        $('#nearest-avl-text').text("No AVL results returned for "+avlType)
+       }
+       var t1 = performance.now();
+       console.log("Call to calculate distances from AVLs took " + (t1 - t0) + " milliseconds.")
+      }
+    }
+  });
+  } else {
+         $('#nearest-avl-text').text('Enabled only for rescue jobs')
+  }
+     } else {
+     $('#nearest-lhq-text').text('No geocoded job location available')
+     $('#nearest-avl-text').text('No geocoded job location available')
+   }
+   } else {
+     $('#nearest-lhq-text').text('No geocoded job location available')
+     $('#nearest-avl-text').text('No geocoded job location available')
+   }
   })
+
+
 
   //
   //postcode checking code
@@ -116,6 +279,9 @@ whenAddressIsReady(function() {
 quickTask = return_quicktaskbutton();
 quickSector = return_quicksectorbutton();
 quickCategory = return_quickcategorybutton();
+quickRadioLog = return_quickradiologbutton();
+instantRadiologModal = return_quickradiologmodal();
+
 
 //the quicktask button
 $(quickTask).find('button').click(function() {
@@ -125,7 +291,7 @@ $(quickTask).find('button').click(function() {
   }
 });
 
-//the quicktask button
+//the quicksector button
 $(quickSector).find('button').click(function() {
   if ($(quickSector).hasClass("open") == false)
   {
@@ -133,7 +299,7 @@ $(quickSector).find('button').click(function() {
   }
 });
 
-//the quicktask button
+//the quickcategory button
 $(quickCategory).find('button').click(function() {
   if ($(quickCategory).hasClass("open") == false)
   {
@@ -141,11 +307,57 @@ $(quickCategory).find('button').click(function() {
   }
 });
 
+
+//add the radio log modal
+$( "body" ).append(instantRadiologModal);
+
+//the quick radio log button
+$(quickRadioLog).find('button').click(function() {
+  $('#instantradiologModal').modal()
+});
+
+// submit radio log on enter press in message body
+$('#instantRadioLogText').keydown(function(event) {
+    if (event.keyCode == 13) {
+        processSubmitInstantRadioLog()
+        return false;
+     }
+   })
+
+//submit radio log on submit button press
+$(instantRadiologModal).find('#submitInstantRadioLogButton').click(function() {
+processSubmitInstantRadioLog()
+});
+
+//handle both the above submits
+function processSubmitInstantRadioLog() {
+  if ($('#instantRadioLogText').val() == '') {
+    $('#instantRadioLogTextForm').addClass('has-error')
+  } else {
+submitInstantRadioLog($('#instantRadioLogCallSign').val(),$('#instantRadioLogText').val(),function(result) {
+  if (result) {
+    $('#instantradiologModal').modal('hide')
+    $('#instantRadioLogTextForm').removeClass('has-error') //just incase
+    $('#instantRadioLogText').val('')
+  } else {
+    alert('Error submitting log entry')
+  }
+})
+}
+}
+
+
 whenJobIsReady(function(){
+
+
   if (masterViewModel.canTask.peek() == true) //this role covers sectors and category as well
   {
     $('#lighthouse_actions_content').append(quickTask, quickSector, quickCategory);
+
   }
+
+  $('#lighthouse_actions_content').append(quickRadioLog);
+
 });
 
 
@@ -161,7 +373,8 @@ whenTeamsAreReady(function(){
 
   if (masterViewModel.sector.peek() !== null)
   {
-    $('#content div.col-md-5 div[data-bind="visible: jobLoaded()"] div.widget-header')[0].append(renderSectorFilterCheckBox());
+    console.log('sector filter enabled')
+    $('#lighthouse_actions div.widget-header').append(renderSectorFilterCheckBox());
 
     $('#lighthouseSectorFilterEnabled').click(function() {
       // Toggle Value
@@ -188,9 +401,13 @@ whenTeamsAreReady(function(){
 function sectorfilter_switch(){
   // Set flag
   var lh_SectorFilterEnabled = localStorage.getItem('LighthouseSectorFilterEnabled') == 'false';
-  // Adjust View
-  jobView_teamsTasked_completedHiddenSwitch();
+  // Toggle class for checkbox
+  $('#lighthouseSectorFilterEnabled')
+    .toggleClass('fa-check-square-o', lh_SectorFilterEnabled)
+    .toggleClass('fa-square-o', !lh_SectorFilterEnabled);
 }
+
+
 
 
 
@@ -258,7 +475,53 @@ $(document).on('click',  'div.widget > div.widget-content > div[data-bind$="task
 
 document.title = "#"+jobId;
 
-function lighthouseKeeper(){
+
+function lighthouseTimeLineTPlus() {
+  whenJobIsReady(function(){
+    let jobCreatedMoment = moment(masterViewModel.jobReceived())
+    $('div[data-bind="foreach: jobHistory"] small[data-bind="text: moment(TimeStamp).format(utility.dtFormat)"]').each(function (r) {
+      let res = $(this).text()
+      let tPlusText = returnTTime(res)
+      $(this).text($(this).text().replace(res,`${res} (${tPlusText})`))
+      $(this).attr('lhTPlus',tPlusText)
+    })
+    console.log("lighthouseTimeLineTPlus Done calculating Tplus times")
+  })
+}
+
+function lighthouseMessageTPlus(dom) {
+  whenJobIsReady(function(){
+    dom.each(function (r) {
+      let res = $(this).text().match(/^(?:Received|Created) (?:at|on) (.+) by (.+)$/);
+      if (res && res.length) {
+        let tPlusText = returnTTime(res[1])
+        $(this).text($(this).text().replace(res[1],`${res[1]} (${tPlusText})`))
+        $(this).attr('lhTPlus',tPlusText)
+      }
+    })
+    console.log("lighthouseMessageTPlus Done calculating Tplus times")
+  })
+}
+
+function returnTTime(messageDate) {
+  let jobCreatedMoment = moment(masterViewModel.jobReceived())
+  let end = moment(messageDate,'DD/MM/YYYY HH:mm')
+  jobCreatedMoment.seconds(0) //zero the seconds because the log doesnt show seconds
+  //work out if its T+ or T-
+  let whichFirst = jobCreatedMoment.isBefore(end)
+  let tPlus = moment.duration(end.diff(jobCreatedMoment));
+  let years = whichFirst ? tPlus.years() : tPlus.years() * -1,
+  days = whichFirst ? tPlus.days() : tPlus.days() * -1,
+  hrs = whichFirst ? tPlus.hours() : tPlus.hours() * -1,
+  hrsTotal = hrs + (24 * days),  //wont use days so make hours include days
+  mins = whichFirst ? tPlus.minutes() : tPlus.minutes() * -1,
+  secs = whichFirst ? tPlus.seconds() : tPlus.seconds() * -1,
+  symbol = whichFirst ? '+' : '-'
+  let tPlusText = `T${symbol}${pad(hrs)}:${pad(mins)}:${pad(secs)}`
+  return tPlusText
+}
+
+function lighthouseDictionary(){
 
   var $targetElements = $('.job-details-page div[data-bind="foreach: opsLogEntries"] div[data-bind="text: $data"]');
 
@@ -298,9 +561,9 @@ function lighthouseKeeper(){
       contentRepl = contentRepl.replace(new RegExp('\\b(' + abbrText + ')\\b', 'gi'), '<abbr title="' + clearText + '">$1</abbr>');
     });
     if(contentRepl != contentOrig){
-      $t.html(contentRepl).addClass('lighthouseKeeper-modified');
+      $t.html(contentRepl).addClass('lighthouseDictionary-modified');
     }else{
-      $t.addClass('lighthouseKeeper-nomodifications');
+      $t.addClass('lighthouseDictionary-nomodifications');
     }
   });
 
@@ -413,7 +676,6 @@ function InstantSectorButton() {
     , dataType: 'json'
     , data: {LighthouseFunction: 'InstantSectorButton'}
     , complete: function(response, textStatus) {
-      //console.log('textStatus = "%s"', textStatus, response);
       if (textStatus == 'success')
       {
         if(response.responseJSON.Results.length) {
@@ -437,7 +699,8 @@ function InstantSectorButton() {
             }
             $(item).click(function (e) {
               SetSector(entry,currentsector)
-              e.preventDefault();
+              location.reload();
+              //e.preventDefault();
             })
             finalli.push(item)
           })
@@ -498,7 +761,8 @@ function InstantTaskButton() {
 
   var alreadyTasked = []
   $.each(masterViewModel.teamsViewModel.taskedTeams.peek(), function(k,v){
-    if(v.CurrentStatusId != 6)
+    console.log(v.CurrentStatusId)
+    if(v.CurrentStatusId != 6 && v.CurrentStatusId != 7)
     {
       alreadyTasked.push(v.Team.Id);
     }
@@ -529,7 +793,6 @@ function InstantTaskButton() {
     , dataType: 'json'
     , data: {LighthouseFunction: 'QuickTaskGetJob'}
     , complete: function(response, textStatus) {
-      //console.log('textStatus = "%s"', textStatus, response);
 
       if (textStatus == 'success')
       {
@@ -539,7 +802,6 @@ function InstantTaskButton() {
         {
 
           ReturnTeamsActiveAtLHQ(user.hq,sectorFilter,function(response){
-            console.log(response);
 
             if(response.responseJSON.Results.length) {
               $(quickTask).find('ul').empty();
@@ -653,11 +915,13 @@ function InstantTaskButton() {
                   finalli.push($(v))
                 }
               });
+              if (nonsector.length) {
               //finalli.push(return_lidivider());
               finalli.push(return_lipres("Unsectorised Teams"));
               $.each(nonsector, function(k, v){
                 finalli.push(v);
               })
+            }
               $(quickTask).find('ul').append(finalli);
 
             } else {
@@ -679,6 +943,18 @@ function InstantTaskButton() {
 
 }
 
+////Instant radio log stuff
+function submitInstantRadioLog(subject, text,cb) {
+  masterViewModel.notesViewModel.OperationsLogManager.CreateEntry(jobId,null,subject || "Instant Radio Log",text,null, null, null, !1, !1, !1, [15,6],null,function(res) {
+if (res) {
+      masterViewModel.notesViewModel.loadOpsLogPage()
+      cb(true)
+    } else {
+      cb(false)
+    }
+})
+
+}
 
 
 function TaskTeam(teamID) {
@@ -687,20 +963,20 @@ function TaskTeam(teamID) {
   TeamIds.push(teamID);
   var JobIds = [];
   JobIds.push(jobId);
-  data.TeamIds = TeamIds;
-  data.JobIds = JobIds;
-  datastring = JSON.stringify(data);
+
+
   $.ajax({
     type: 'POST'
     , url: urls.Base+'/Api/v1/Tasking'
     , beforeSend: function(n) {
       n.setRequestHeader("Authorization", "Bearer " + user.accessToken)
     }
-    , data: {TeamIds: TeamIds, JobIds: JobIds, LighthouseFunction: 'TaskTeam'}
+    , data: JSON.stringify({TeamIds:TeamIds, JobIds:JobIds, LighthouseFunction: 'TaskTeam'})
     , cache: false
-    , dataType: 'json'
+    , dataType: "json"
+    , contentType: "application/json; charset=utf-8"
     , complete: function(response, textStatus) {
-      if (textStatus == 'success')
+      if (textStatus == 'success' || textStatus == 'error') //work around for beacon bug returning error 500 for no reason
       {
         masterViewModel.teamsViewModel.loadTaskedTeams() //load teams
         masterViewModel.JobManager.GetHistory(jobId,function(t){masterViewModel.jobHistory(t)}) //load job history
@@ -758,11 +1034,17 @@ document.getElementById("CompleteTeamQuickTextBox").onchange = function() {
 }
 
 function return_untask_button() {
-  return (<span class="close" style="
+  return (<span id="untask" class="close" style="
     margin-right: -12px;
     margin-top: -12px;
     margin-left: 10px;
     ">×</span>);
+}
+function return_message_button() {
+  return (<span id="message" class="close fa fa-envelope" style="
+    margin-left: 5px;
+    float: none !important;
+    "></span>);
 }
 
 
@@ -802,7 +1084,7 @@ $(document).ready(function() {
 function return_quicktaskbutton() {
   return (
     <div id="lighthouse_instanttask" style="position:relative;display:inline-block;vertical-align:middle;padding-left:3px;padding-right:3px;" class="dropdown">
-      <button class="btn btn-sm btn-warning dropdown-toggle" type="button" data-toggle="dropdown" id="lhtaskbutton"><img width="14px" style="vertical-align:top;margin-right:5px;float:left" src={lighthouseUrl+"icons/lh.png"}></img>Instant Task
+      <button class="btn btn-sm btn-warning dropdown-toggle" type="button" data-toggle="dropdown" id="lhtaskbutton"><i class="fa fa-tasks"></i>Instant Task
       <span class="caret"></span></button>
       <ul class="dropdown-menu scrollable-menu">
       </ul>
@@ -813,7 +1095,7 @@ function return_quicktaskbutton() {
 function return_quicksectorbutton() {
   return (
     <div id="lighthouse_instantsector" style="position:relative;display:inline-block;vertical-align:middle;padding-left:3px;padding-right:3px;" class="dropdown">
-      <button class="btn btn-sm btn-info dropdown-toggle" type="button" data-toggle="dropdown" id="lhsectorbutton"><img width="14px" style="vertical-align:top;margin-right:5px;float:left" src={lighthouseUrl+"icons/lh.png"}></img>Instant Sector
+      <button class="btn btn-sm btn-info dropdown-toggle" type="button" data-toggle="dropdown" id="lhsectorbutton"><i class="fa fa-cubes"></i>Instant Sector
       <span class="caret"></span></button>
       <ul class="dropdown-menu scrollable-menu">
       </ul>
@@ -824,11 +1106,93 @@ function return_quicksectorbutton() {
 function return_quickcategorybutton() {
   return (
     <div id="lighthouse_instantcategory" style="position:relative;display:inline-block;vertical-align:middle;padding-left:3px;padding-right:3px;" class="dropdown">
-      <button class="btn btn-sm btn-default dropdown-toggle" type="button" data-toggle="dropdown" id="lhcategorybutton"><img width="14px" style="vertical-align:top;margin-right:5px;float:left" src={lighthouseUrl+"icons/lh.png"}></img>Instant Category
+      <button class="btn btn-sm btn-default dropdown-toggle" type="button" data-toggle="dropdown" id="lhcategorybutton"><i class="fa fa-database"></i>Instant Category
       <span class="caret"></span></button>
       <ul class="dropdown-menu scrollable-menu">
       </ul>
     </div>
+  );
+}
+
+function return_quickradiologbutton() {
+  return (
+    <div id="lighthouse_instantradiolog" style="position:relative;display:inline-block;vertical-align:middle;padding-left:3px;padding-right:3px;">
+      <button class="btn btn-sm btn-default" style="background-color: #837947;border-color: #837947" type="button" id="lhinstantradiologbutton"><i class="fa fa-microphone"></i>Instant Radio Log
+      </button>
+    </div>
+  );
+}
+
+function return_quickradiologmodal() {
+  return (
+    <div class="modal fade" id="instantradiologModal" role="dialog" style="display: none;">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header">
+            <button type="button" class="close" data-dismiss="modal" aria-hidden="true">×</button>
+            <h4 class="modal-title"><i class="fa fa-microphone"></i> Instant Radio Log Entry | Job</h4>
+          </div>
+          <div class="modal-body">
+          <div class="form-group" title="">
+            <div class="row">
+              <label class="col-md-4 col-lg-3 control-label">Callsign</label>
+              <div class="col-md-8 col-lg-9">
+                <textarea id="instantRadioLogCallSign" class="form-control" rows="1"></textarea>
+              </div>
+              <div title="">
+              </div>
+            </div>
+          </div>
+            <div class="form-group" title="" id="instantRadioLogTextForm">
+              <div class="row">
+                <label class="col-md-4 col-lg-3 control-label">Note</label>
+                <div class="col-md-8 col-lg-9">
+                  <textarea id="instantRadioLogText" class="form-control"></textarea>
+                </div>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+              <button type="button" class="btn btn-info" id="submitInstantRadioLogButton"><span class="button-text">Submit</span></button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function return_quicketarow() {
+  return (
+      <div style="display: inline-block">
+        <span id="5min" class="label tag tag-darkgreen tag-disabled">
+          <span class="tag-text"><img style="width:16px;vertical-align:top;margin-right:5px;margin-left:5px"
+          src={lighthouseUrl+"icons/lh.png"} />+5min</span>
+        </span>
+        <span id="10min" class="label tag tag-darkgreen tag-disabled">
+          <span class="tag-text"><img style="width:16px;vertical-align:top;margin-right:5px;margin-left:5px"
+          src={lighthouseUrl+"icons/lh.png"} />+10min</span>
+        </span>
+        <span id="15min" class="label tag tag-darkgreen tag-disabled">
+          <span class="tag-text"><img style="width:16px;vertical-align:top;margin-right:5px;margin-left:5px"
+          src={lighthouseUrl+"icons/lh.png"} />+15min</span>
+        </span>
+        <span id="30min" class="label tag tag-darkgreen tag-disabled">
+          <span class="tag-text"><img style="width:16px;vertical-align:top;margin-right:5px;margin-left:5px"
+          src={lighthouseUrl+"icons/lh.png"} />+30min</span>
+        </span>
+        <span id="60min" class="label tag tag-darkgreen tag-disabled">
+          <span class="tag-text"><img style="width:16px;vertical-align:top;margin-right:5px;margin-left:5px"
+          src={lighthouseUrl+"icons/lh.png"} />+60min</span>
+        </span>
+      </div>
+  );
+}
+
+function return_quicketamoment() {
+  return (
+      <div style="padding-left: 5px" id="quickETAtext">
+      </div>
   );
 }
 
@@ -900,7 +1264,6 @@ function checkAddressHistory(){
     , cache: false
     , dataType: 'json'
     , complete: function(response, textStatus) {
-      //console.log('textStatus = "%s"', textStatus, response);
       var $job_view_history_container = $('#job_view_history_container');
       switch(textStatus){
         case 'success':
@@ -1109,7 +1472,6 @@ function checkAddressHistory(){
 }
 
 setTimeout(checkAddressHistory, 400);
-DoTour()
 
 // wait for teams to have loaded
 function whenTeamsAreReady(cb) { //when external vars have loaded
@@ -1211,92 +1573,8 @@ function untaskTeamFromJob(TeamID, JobID, TaskingID) {
   })
 }
 
-
-
-function DoTour() {
-  require('bootstrap-tour')
-
-  //this thing needs an id - its the page length box
-  $('#content > div.widget.clearfix.job-reg-widget > div.widget-content > div > div.col-xs-4.text-right.job-reg-padding-fix > span').attr("id","pageination")
-
-
-
-    // Instance the tour
-    var tour = new Tour({
-      name: "LHTourJobView",
-      smartPlacement: true,
-      placement: "right",
-      steps: [
-      {
-        element: "",
-        placement: "top",
-        orphan: true,
-        backdrop: true,
-        title: "Lighthouse Welcome",
-        content: "Lighthouse has made some changes to this page. would you like a tour?"
-      },
-      {
-        element: "#asbestos-register-text",
-        title: "Lighthouse Loose Fill Asbestos Register",
-        placement: "top",
-        backdrop: false,
-        content: "Lighthouse will search the NSW Dept Of Fair Trading Loose Fill Abestos Register for the jobs address and display the results.",
-      },
-      {
-        element: "#job_view_history_groups",
-        title: "Lighthouse Job History",
-        placement: "top",
-        backdrop: false,
-        content: "Lighthouse will search for jobs with the same or similar address to this job. the results will be displayed here.",
-      },
-      {
-        element: "#lighthouse_actions_content",
-        placement: "left",
-        orphan: true,
-        backdrop: false,
-        title: "Instant Actions",
-        content: "If your permissions allow, you will be able to Task, Sector or Categorise the job without leaving the job details page."
-      },
-      {
-        element: "",
-        placement: "top",
-        orphan: true,
-        backdrop: true,
-        title: "Untask",
-        content: "If a team can be untasked from the job there will be a little x button next to them in the list of tasked teams."
-      },
-      {
-        element: "",
-        placement: "top",
-        orphan: true,
-        backdrop: true,
-        title: "Quick Text and Tasks",
-        onNext: function(tour) {
-          $('#completeProviderModal').modal('hide');
-        },
-        content: "There are numerous Quick Text and Quick Task addons for team and job completion, as well as job finalisation. This saves having to click or type common tasks and actions. They appear on the completion popups"
-      },
-      {
-        element: "#lighthouse_mapblock",
-        title: "Lighthouse Map Tweak",
-        placement: "top",
-        backdrop: false,
-        content: "To scroll the map you will need to click on it first. this stops the map 'stealing' the cursor when you scroll past",
-      },
-      {
-        element: "",
-        placement: "top",
-        orphan: true,
-        backdrop: true,
-        title: "Questions?",
-        content: "If you have any questions please seek help from the 'About Lighthout' button under the lighthouse menu on the top menu"
-      }
-      ]
-    })
-
-    /// Initialize the tour
-    tour.init();
-
-// Start the tour
-tour.start();
+function pad(n, z) {
+  z = z || '0';
+  n = n + '';
+  return n.length >= 2 ? n : new Array(2 - n.length + 1).join(z) + n;
 }
